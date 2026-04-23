@@ -43,6 +43,7 @@ jobs:
           version: '6.4.3'
           modules: qt5compat
           install-deps: false
+          setup-python: false
 
       - name: Build QCA and QtKeychain
         run: |
