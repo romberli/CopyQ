@@ -35,15 +35,14 @@ jobs:
             libxkbcommon-x11-dev libdbus-1-dev \
             python3 python3-pip python3-setuptools python3-wheel python3-dev
           
-          python3 -m pip install --upgrade pip setuptools
+          pip3 install aqtinstall
 
       - name: Install Qt 6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: '6.4.3'
-          modules: qt5compat
-          install-deps: false
-          setup-python: false
+        run: |
+          aqt install-qt linux desktop 6.4.3 -O /opt/Qt -m qt5compat
+          echo "/opt/Qt/6.4.3/gcc_64/bin" >> $GITHUB_PATH
+          echo "Qt6_DIR=/opt/Qt/6.4.3/gcc_64" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/Qt/6.4.3/gcc_64/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
       - name: Build QCA and QtKeychain
         run: |
@@ -81,7 +80,7 @@ jobs:
         run: |
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="/usr/local" \
+            -DCMAKE_PREFIX_PATH="/usr/local;/opt/Qt/6.4.3/gcc_64" \
             -DWITH_APPIMAGE=TRUE
           cmake --build build --parallel
 
@@ -100,7 +99,7 @@ jobs:
           DESTDIR: ${{ github.workspace }}/AppDir
           VERSION: "UOS-Edition"
           EXTRA_QT_MODULES: "svg;tls"
-          QMAKE: qmake6
+          QMAKE: /opt/Qt/6.4.3/gcc_64/bin/qmake6
         run: |
           DESTDIR="$DESTDIR" cmake --install build
           mkdir -p "$DESTDIR/usr/plugins/crypto"
