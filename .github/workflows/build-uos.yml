@@ -1,0 +1,112 @@
+name: Build for UOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build UOS-Compatible
+    runs-on: ubuntu-latest
+    container: debian:10
+    
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Build Environment
+        run: |
+         # 1. 换源
+          sed -i 's|deb.debian.org|archive.debian.org|g' /etc/apt/sources.list
+          sed -i 's|security.debian.org|archive.debian.org|g' /etc/apt/sources.list
+          sed -i '/stretch-updates/d' /etc/apt/sources.list
+          
+          # 2. 更新
+          apt-get update
+          
+          # 3. 安装依赖 (注意：必须包含 python3-dev)
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build ccache git wget ca-certificates \
+            libxfixes-dev libxtst-dev extra-cmake-modules \
+            libwayland-dev libegl1-mesa-dev libgl-dev libxkbcommon-dev \
+            libssl-dev pkg-config libfuse2 \
+            python3 python3-pip python3-setuptools python3-wheel python3-dev
+            
+          # 4. 升级工具链
+          python3 -m pip install --upgrade pip setuptools
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.4.3'
+          modules: qt5compat     
+
+      - name: Build QCA and QtKeychain
+        run: |
+          # QCA
+          git clone --depth 1 --branch v2.3.10 https://github.com/KDE/qca.git /tmp/qca
+          cmake -G Ninja -S /tmp/qca -B /tmp/qca-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBUILD_WITH_QT6=ON -DBUILD_TESTS=OFF -DBUILD_PLUGINS=ossl
+          cmake --build /tmp/qca-build --parallel
+          cmake --install /tmp/qca-build
+
+          # QtKeychain
+          git clone --depth 1 --branch 0.15.0 https://github.com/frankosterfeld/qtkeychain.git /tmp/qtkeychain
+          cmake -G Ninja -S /tmp/qtkeychain -B /tmp/qtkeychain-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBUILD_WITH_QT6=ON
+          cmake --build /tmp/qtkeychain-build --parallel
+          cmake --install /tmp/qtkeychain-build
+          
+          echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf
+          ldconfig          
+
+      - name: Download miniaudio
+        run: |
+          mkdir -p src/miniaudio
+          wget -O src/miniaudio/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h          
+
+      - name: Build CopyQ
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="/usr/local" \
+            -DWITH_APPIMAGE=TRUE
+          cmake --build build --parallel          
+
+      - name: Download linuxdeploy
+        run: |
+          mkdir -p ~/.local/bin
+          cd ~/.local/bin
+          wget -O linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20250213-2/linuxdeploy-x86_64.AppImage
+          wget -O linuxdeploy-plugin-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+          wget -O linuxdeploy-plugin-appimage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage
+          chmod +x linuxdeploy*
+          echo "$HOME/.local/bin" >> $GITHUB_PATH          
+
+      - name: Create AppImage
+        env:
+          DESTDIR: ${{ github.workspace }}/AppDir
+          VERSION: "UOS-Edition"
+          EXTRA_QT_MODULES: "svg;tls"
+          QMAKE: qmake6
+        run: |
+          DESTDIR="$DESTDIR" cmake --install build
+          # 处理 QCA 插件
+          mkdir -p $DESTDIR/usr/plugins/crypto
+          cp /usr/local/lib/plugins/crypto/libqca-ossl.so $DESTDIR/usr/plugins/crypto/ || true
+          linuxdeploy --appdir $DESTDIR \
+            --desktop-file $DESTDIR/usr/share/applications/com.github.hluk.copyq.desktop \
+            --icon-file $DESTDIR/usr/share/icons/hicolor/scalable/apps/copyq.svg \
+            --executable $DESTDIR/usr/bin/copyq \
+            --plugin qt \
+            --output appimage
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CopyQ-UOS-AppImage
+          path: CopyQ-*.AppImage
