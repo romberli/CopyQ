@@ -30,7 +30,7 @@ jobs:
             libxfixes-dev libxtst-dev extra-cmake-modules \
             libwayland-dev libegl1-mesa-dev libgl-dev libxkbcommon-dev \
             libssl-dev pkg-config libfuse2 \
-            libxcb1-dev libxcb-icccm4-dev libxcb-image0-dev libxcb-keysymbols1-dev \
+            libxcb1-dev libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
             libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev \
             libxkbcommon-x11-dev libdbus-1-dev \
