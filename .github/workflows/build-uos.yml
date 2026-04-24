@@ -252,20 +252,11 @@ jobs:
           echo "Found QCA ossl plugin: $qca_ossl"
           cp -a "$qca_ossl" "$DESTDIR/usr/plugins/crypto/"
 
-          # linuxdeploy normally requires FUSE to run the AppImages, which is
-          # not available in every CI container. Extract them and invoke the
-          # resulting AppRun directly.
-          cd "$HOME/.local/bin"
-          for f in linuxdeploy linuxdeploy-plugin-qt linuxdeploy-plugin-appimage; do
-            if ! "./$f" --appimage-version >/dev/null 2>&1; then
-              "./$f" --appimage-extract >/dev/null
-              mv squashfs-root "${f}.extracted"
-              rm -f "$f"
-              ln -sf "${f}.extracted/AppRun" "$f"
-            fi
-          done
-
-          cd "$GITHUB_WORKSPACE"
+          # FUSE isn't available inside GitHub Actions containers.
+          # APPIMAGE_EXTRACT_AND_RUN=1 tells type-2 AppImages to self-extract
+          # to a temp dir and run from there — used by linuxdeploy, its plugins,
+          # and the appimagetool that linuxdeploy-plugin-appimage invokes.
+          export APPIMAGE_EXTRACT_AND_RUN=1
 
           linuxdeploy --appdir "$DESTDIR" \
             --desktop-file "$DESTDIR/usr/share/applications/com.github.hluk.copyq.desktop" \
@@ -284,11 +275,13 @@ jobs:
       - name: Smoke-test AppImage
         env:
           APPIMAGE: CopyQ-${{ steps.version.outputs.version }}-uos20-glibc2.28-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           set -eux
-          # Extract and run — containers usually lack FUSE.
+          # Run the AppImage in extract-and-run mode (no FUSE in container).
+          ./"$APPIMAGE" --version
+          # Also extract once so we can inspect the bundled binary.
           ./"$APPIMAGE" --appimage-extract >/dev/null
-          ./squashfs-root/AppRun --version
           # Verify glibc version requirement does not exceed 2.28.
           max_ver=$(objdump -T ./squashfs-root/usr/bin/copyq 2>/dev/null \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V -u | tail -n1 || true)
