@@ -52,7 +52,8 @@ jobs:
             build-essential ninja-build ccache git curl wget ca-certificates \
             xz-utils file sudo pkg-config \
             libssl-dev libxfixes-dev libxtst-dev extra-cmake-modules \
-            libwayland-dev libegl1-mesa-dev libgl1-mesa-dev libxkbcommon-dev \
+            libwayland-dev libwayland-bin wayland-protocols \
+            libegl1-mesa-dev libgl1-mesa-dev libxkbcommon-dev \
             libxcb1-dev libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
             libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev \
