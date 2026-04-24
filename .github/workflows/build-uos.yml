@@ -236,7 +236,10 @@ jobs:
           DESTDIR: ${{ github.workspace }}/AppDir
           VERSION: ${{ steps.version.outputs.version }}
           EXTRA_QT_MODULES: 'svg;tls'
-          EXTRA_PLATFORM_PLUGINS: 'libqwayland.so'
+          # In Qt 6 the wayland plugin is called libqwayland-generic.so, not
+          # libqwayland.so. UOS 20 defaults to X11 anyway; the xcb platform
+          # plugin is deployed automatically by linuxdeploy-plugin-qt.
+          EXTRA_PLATFORM_PLUGINS: 'libqwayland-generic.so'
         run: |
           set -eux
           export QMAKE="${QT_ROOT_DIR}/bin/qmake6"
