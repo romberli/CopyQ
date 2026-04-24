@@ -35,7 +35,9 @@ jobs:
             libxkbcommon-x11-dev libdbus-1-dev \
             python3 python3-pip python3-setuptools python3-wheel python3-dev
           
-          pip3 install 'aqtinstall<2'
+          pip3 install requests semantic-version texttable
+          pip3 install --no-deps aqtinstall==1.2.5
+          pip3 install 'py7zr<0.20'
 
       - name: Install Qt 6
         run: |
