@@ -241,6 +241,9 @@ jobs:
           # libqwayland.so. UOS 20 defaults to X11 anyway; the xcb platform
           # plugin is deployed automatically by linuxdeploy-plugin-qt.
           EXTRA_PLATFORM_PLUGINS: 'libqwayland-generic.so'
+        # Force bash so we can use arrays, [[ ]] and process substitution.
+        # The Debian 10 container's default /bin/sh is dash.
+        shell: bash
         run: |
           set -eux
           export QMAKE="${QT_ROOT_DIR}/bin/qmake6"
