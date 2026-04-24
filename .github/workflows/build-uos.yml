@@ -256,40 +256,140 @@ jobs:
           echo "Found QCA ossl plugin: $qca_ossl"
           cp -a "$qca_ossl" "$DESTDIR/usr/plugins/crypto/"
 
-          # linuxdeploy-plugin-qt's built-in blacklist skips libOpenGL/libGLX/
-          # libGLdispatch (assuming the host always has them). UOS 20 minimal
-          # installs don't ship them, so copy them into AppDir/usr/lib/ before
-          # linuxdeploy runs — linuxdeploy preserves files that are already
-          # present, and AppRun prepends AppDir/usr/lib to LD_LIBRARY_PATH.
-          mkdir -p "$DESTDIR/usr/lib"
-          for soname in libOpenGL.so.0 libGLX.so.0 libGLdispatch.so.0 \
-                        libEGL.so.1 libGLESv2.so.2; do
-              src=$(find /usr/lib/x86_64-linux-gnu /usr/lib /lib/x86_64-linux-gnu \
-                  -maxdepth 2 -name "$soname" -print -quit 2>/dev/null || true)
-              if [ -n "$src" ]; then
-                  # Follow symlinks and copy the real file + recreate the SONAME link.
-                  real=$(readlink -f "$src")
-                  cp -a "$real" "$DESTDIR/usr/lib/"
-                  ( cd "$DESTDIR/usr/lib" && ln -sf "$(basename "$real")" "$soname" )
-                  echo "Bundled OpenGL loader: $src -> $real"
-              else
-                  echo "::warning::Could not find $soname to bundle"
-              fi
-          done
-
           # FUSE isn't available inside GitHub Actions containers.
           # APPIMAGE_EXTRACT_AND_RUN=1 tells type-2 AppImages to self-extract
           # to a temp dir and run from there — used by linuxdeploy, its plugins,
           # and the appimagetool that linuxdeploy-plugin-appimage invokes.
           export APPIMAGE_EXTRACT_AND_RUN=1
 
+          # Step 1: Let linuxdeploy deploy Qt and its own set of libs.
+          # We'll produce the AppImage ourselves in step 3 after dep-fixup,
+          # so don't pass --output appimage here.
           linuxdeploy --appdir "$DESTDIR" \
             --desktop-file "$DESTDIR/usr/share/applications/com.github.hluk.copyq.desktop" \
             --icon-file "$DESTDIR/usr/share/icons/hicolor/scalable/apps/copyq.svg" \
             --executable "$DESTDIR/usr/bin/copyq" \
             --deploy-deps-only "$DESTDIR/usr/plugins/crypto" \
-            --plugin qt \
-            --output appimage
+            --plugin qt
+
+          # Step 2: Bundle every indirect .so dependency that linuxdeploy's
+          # hard-coded blacklist skipped. On UOS 20 minimal installs these
+          # simply aren't present (libOpenGL/libGLX/libfreetype/libfontconfig
+          # are the common ones). We keep a narrow allow-list of things that
+          # MUST stay linked to the host: glibc (libc/m/pthread/dl/rt/resolv,
+          # ld-linux) and the GPU driver stub libGL.so.1.
+          #
+          # The loop keeps scanning until nothing new is added (transitive
+          # closure of ldd over everything inside AppDir).
+          mkdir -p "$DESTDIR/usr/lib"
+
+          is_excluded() {
+            # Libraries we intentionally leave to the host system.
+            case "$1" in
+              ld-linux*|ld-linux-*.so.*|ld.so.*) return 0 ;;
+              libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*) return 0 ;;
+              libresolv.so.*|libnsl.so.*|libutil.so.*|libnss_*.so.*) return 0 ;;
+              # GPU userspace driver stub — must match the running kernel's driver.
+              libGL.so.*|libdrm.so.*|libGLdispatch.so.*) return 0 ;;
+              # libGLdispatch is sometimes bundled via libglvnd; if you need
+              # it bundled, drop the last entry above. We bundle it on UOS.
+              *) return 1 ;;
+            esac
+          }
+
+          # Actually we DO want to bundle libOpenGL/libGLX/libGLdispatch, so
+          # revise the exclusion list (keep them in AppImage).
+          is_excluded() {
+            case "$1" in
+              ld-linux*|ld-linux-*.so.*|ld.so.*) return 0 ;;
+              libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*) return 0 ;;
+              libresolv.so.*|libnsl.so.*|libutil.so.*|libnss_*.so.*) return 0 ;;
+              libGL.so.*|libdrm.so.*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          copy_so() {
+            local src="$1"
+            local soname="$2"
+            local real
+            real=$(readlink -f "$src")
+            local base
+            base=$(basename "$real")
+            if [ ! -f "$DESTDIR/usr/lib/$base" ]; then
+              cp -a "$real" "$DESTDIR/usr/lib/"
+            fi
+            if [ "$soname" != "$base" ] && \
+               [ ! -e "$DESTDIR/usr/lib/$soname" ]; then
+              ( cd "$DESTDIR/usr/lib" && ln -sf "$base" "$soname" )
+            fi
+          }
+
+          scan_pass() {
+            local added=0
+            # All ELFs: main binary, Qt/QCA plugins, and already-bundled libs.
+            # We rescan bundled libs too so transitive deps are followed.
+            find "$DESTDIR" -type f \( -name '*.so' -o -name '*.so.*' \
+                                       -o -path '*/bin/*' \
+                                       -o -path '*/libexec/*' \) \
+                2>/dev/null | while read -r elf; do
+              # Skip non-ELFs cheaply using `file` (already installed).
+              file -b --mime-type "$elf" 2>/dev/null | \
+                grep -q 'application/x-\(pie-\)\?executable\|application/x-sharedlib' || continue
+              ldd "$elf" 2>/dev/null | while read -r line; do
+                # Parse "libfoo.so.1 => /path/to/libfoo.so.1 (0x...)"
+                soname=$(echo "$line" | awk '{print $1}')
+                path=$(echo "$line" | awk '/=>/ {print $3}')
+                [ -z "$soname" ] && continue
+                [ -z "$path" ] && continue
+                [ "$path" = "not" ] && continue  # "not found"
+                case "$path" in /*) ;; *) continue ;; esac
+                # Skip if path is already inside AppDir.
+                case "$path" in "$DESTDIR"/*) continue ;; esac
+                is_excluded "$soname" && continue
+                # Copy if not yet present.
+                if [ ! -e "$DESTDIR/usr/lib/$soname" ]; then
+                  copy_so "$path" "$soname"
+                  echo "  bundled: $soname  <-  $path"
+                  added=1
+                fi
+              done
+            done
+            return $added
+          }
+
+          echo "--- Dependency fixup: bundling missing non-glibc libraries ---"
+          for i in 1 2 3 4 5; do
+            echo "Pass $i:"
+            prev_count=$(find "$DESTDIR/usr/lib" -maxdepth 1 -type f | wc -l)
+            scan_pass || true
+            new_count=$(find "$DESTDIR/usr/lib" -maxdepth 1 -type f | wc -l)
+            if [ "$prev_count" -eq "$new_count" ]; then
+              echo "  (no new libraries in pass $i — closure reached)"
+              break
+            fi
+          done
+          echo "--- Final bundled library count: $(find "$DESTDIR/usr/lib" -maxdepth 1 -type f | wc -l) ---"
+
+          # Sanity-check: no ELF inside AppDir should have unresolved
+          # non-glibc deps. Report any that remain.
+          echo "--- Verifying no missing deps (excluding host glibc/libGL) ---"
+          missing=0
+          while read -r elf; do
+            file -b --mime-type "$elf" 2>/dev/null | \
+              grep -q 'application/x-\(pie-\)\?executable\|application/x-sharedlib' || continue
+            while read -r dep; do
+              is_excluded "$dep" && continue
+              if ! ls "$DESTDIR/usr/lib/$dep" >/dev/null 2>&1; then
+                echo "::warning::$elf still needs $dep (not bundled)"
+                missing=$((missing+1))
+              fi
+            done < <(ldd "$elf" 2>/dev/null | awk '/=> not found/ {print $1}')
+          done < <(find "$DESTDIR" -type f \( -name '*.so' -o -name '*.so.*' -o -path '*/bin/*' \))
+          echo "Missing deps: $missing"
+
+          # Step 3: Build the AppImage from the finalized AppDir.
+          linuxdeploy-plugin-appimage --appdir "$DESTDIR"
 
           # Rename to a more descriptive name that signals UOS compatibility.
           for f in CopyQ-*.AppImage; do
