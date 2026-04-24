@@ -50,7 +50,7 @@ jobs:
 
       - name: Install Qt 6
         run: |
-          aqt install linux desktop 6.4.3 -O /opt/Qt -m qt5compat
+          aqt install 6.4.3 linux desktop -O /opt/Qt -m qt5compat
           echo "/opt/Qt/6.4.3/gcc_64/bin" >> $GITHUB_PATH
           echo "Qt6_DIR=/opt/Qt/6.4.3/gcc_64" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/Qt/6.4.3/gcc_64/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> $GITHUB_ENV
