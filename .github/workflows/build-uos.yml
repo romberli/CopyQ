@@ -171,6 +171,11 @@ jobs:
           set -eux
           # Prepend /usr/local (QCA + QtKeychain) and Qt to CMAKE_PREFIX_PATH.
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH}"
+          # ECM 5.56 (Debian 10) doesn't export Wayland_DATADIR from
+          # FindWayland.cmake. Query wayland-scanner directly and pass it in.
+          WAYLAND_DATADIR=$(pkg-config --variable=pkgdatadir wayland-scanner)
+          echo "Wayland_DATADIR=$WAYLAND_DATADIR"
+
           # WITH_NATIVE_NOTIFICATIONS needs KDE Frameworks 6 (KF6 >= 5.248),
           # which isn't available on Debian 10 / UOS 20. CopyQ falls back
           # to its built-in notification popup without it.
@@ -180,6 +185,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DWayland_DATADIR="$WAYLAND_DATADIR" \
             -DWITH_APPIMAGE=TRUE \
             -DWITH_QCA_ENCRYPTION=TRUE \
             -DWITH_KEYCHAIN=TRUE \
