@@ -54,6 +54,7 @@ jobs:
             libssl-dev libxfixes-dev libxtst-dev extra-cmake-modules \
             libwayland-dev libwayland-bin wayland-protocols \
             libegl1-mesa-dev libgl1-mesa-dev libxkbcommon-dev \
+            libglvnd0 libopengl0 libglx0 libegl1 libgles2 \
             libxcb1-dev libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
             libxcb-randr0-dev libxcb-render-util0-dev libxcb-shape0-dev \
             libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev \
@@ -255,6 +256,27 @@ jobs:
           echo "Found QCA ossl plugin: $qca_ossl"
           cp -a "$qca_ossl" "$DESTDIR/usr/plugins/crypto/"
 
+          # linuxdeploy-plugin-qt's built-in blacklist skips libOpenGL/libGLX/
+          # libGLdispatch (assuming the host always has them). UOS 20 minimal
+          # installs don't ship them, so copy them into AppDir/usr/lib/ before
+          # linuxdeploy runs — linuxdeploy preserves files that are already
+          # present, and AppRun prepends AppDir/usr/lib to LD_LIBRARY_PATH.
+          mkdir -p "$DESTDIR/usr/lib"
+          for soname in libOpenGL.so.0 libGLX.so.0 libGLdispatch.so.0 \
+                        libEGL.so.1 libGLESv2.so.2; do
+              src=$(find /usr/lib/x86_64-linux-gnu /usr/lib /lib/x86_64-linux-gnu \
+                  -maxdepth 2 -name "$soname" -print -quit 2>/dev/null || true)
+              if [ -n "$src" ]; then
+                  # Follow symlinks and copy the real file + recreate the SONAME link.
+                  real=$(readlink -f "$src")
+                  cp -a "$real" "$DESTDIR/usr/lib/"
+                  ( cd "$DESTDIR/usr/lib" && ln -sf "$(basename "$real")" "$soname" )
+                  echo "Bundled OpenGL loader: $src -> $real"
+              else
+                  echo "::warning::Could not find $soname to bundle"
+              fi
+          done
+
           # FUSE isn't available inside GitHub Actions containers.
           # APPIMAGE_EXTRACT_AND_RUN=1 tells type-2 AppImages to self-extract
           # to a temp dir and run from there — used by linuxdeploy, its plugins,
@@ -285,6 +307,18 @@ jobs:
           ./"$APPIMAGE" --version
           # Also extract once so we can inspect the bundled binary.
           ./"$APPIMAGE" --appimage-extract >/dev/null
+
+          # Confirm critical runtime libraries are bundled.
+          echo "--- Bundled libs in AppDir/usr/lib: ---"
+          ls ./squashfs-root/usr/lib | sort
+          for must_have in libOpenGL.so.0 libGLX.so.0 libGLdispatch.so.0; do
+            if ! ls ./squashfs-root/usr/lib/"$must_have" >/dev/null 2>&1; then
+              echo "::error::$must_have is missing from the AppImage"
+              exit 1
+            fi
+          done
+          echo "OpenGL loader libraries bundled correctly."
+
           # Verify glibc version requirement does not exceed 2.28.
           max_ver=$(objdump -T ./squashfs-root/usr/bin/copyq 2>/dev/null \
             | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -V -u | tail -n1 || true)
