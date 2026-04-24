@@ -170,6 +170,9 @@ jobs:
           set -eux
           # Prepend /usr/local (QCA + QtKeychain) and Qt to CMAKE_PREFIX_PATH.
           export CMAKE_PREFIX_PATH="/usr/local:${CMAKE_PREFIX_PATH}"
+          # WITH_NATIVE_NOTIFICATIONS needs KDE Frameworks 6 (KF6 >= 5.248),
+          # which isn't available on Debian 10 / UOS 20. CopyQ falls back
+          # to its built-in notification popup without it.
           cmake -G Ninja -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
@@ -179,6 +182,7 @@ jobs:
             -DWITH_APPIMAGE=TRUE \
             -DWITH_QCA_ENCRYPTION=TRUE \
             -DWITH_KEYCHAIN=TRUE \
+            -DWITH_NATIVE_NOTIFICATIONS=FALSE \
             -DWITH_TESTS=OFF
 
       - name: Build CopyQ
